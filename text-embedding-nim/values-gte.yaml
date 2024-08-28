@@ -1,0 +1,9 @@
+model:
+  source: git
+  directoryName: thenlper/gte-large
+  template:
+    file: "gte_template.yaml"
+    custom: null
+  path: https://huggingface.co/thenlper/gte-large
+  checkpoint: ""
+  revision: "1"

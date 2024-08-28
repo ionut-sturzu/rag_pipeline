@@ -1,0 +1,56 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-NvidiaProprietary
+#
+# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+# property and proprietary rights in and to this material, related
+# documentation and any modifications thereto. Any use, reproduction,
+# disclosure or distribution of this material and related documentation
+# without an express license agreement from NVIDIA CORPORATION or
+# its affiliates is strictly prohibited.
+{{- if and (.Values.persistence.createPV)}}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ include "nemo-embedder.model-claim-name" . }}
+  annotations:
+    {{- if .Values.persistence.retain }}
+    helm.sh/resource-policy: keep
+    {{- end }}
+  labels:
+    app.kubernetes.io/name: {{ include "nemo-embedder.model-claim-name" . }}
+spec:
+  accessModes:
+    - {{ .Values.persistence.accessMode }}
+  capacity:
+    storage: {{ .Values.persistence.size }}
+  storageClassName: {{ .Values.persistence.class | quote }}
+  {{- if .Values.persistence.hostPath }}
+  hostPath:
+    path: {{ .Values.persistence.hostPath }}
+    type: Directory
+  {{- end }}
+{{- end }}
+
+{{ if not .Values.persistence.existingClaimName }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "nemo-embedder.model-claim-name" . }}
+  annotations:
+    {{- if .Values.persistence.retain }}
+    helm.sh/resource-policy: keep
+    {{- end }}
+  labels:
+    app.kubernetes.io/name: {{ include "nemo-embedder.model-claim-name" . }}
+spec:
+  accessModes:
+    - {{ .Values.persistence.accessMode | quote }}
+  {{- if .Values.persistence.class }}
+  storageClassName: {{ .Values.persistence.class }}
+  {{- end }}
+  resources:
+    requests:
+      storage: "{{ .Values.persistence.size }}"
+{{- end }}

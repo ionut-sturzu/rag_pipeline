@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-NvidiaProprietary
+#
+# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+# property and proprietary rights in and to this material, related
+# documentation and any modifications thereto. Any use, reproduction,
+# disclosure or distribution of this material and related documentation
+# without an express license agreement from NVIDIA CORPORATION or
+# its affiliates is strictly prohibited.
+{{- if and .Values.compilation.enabled .Values.compilation.template.custom }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nemo-embedder.fullname" . }}-template
+data:
+  # This is the location to configure default pipelines configuration
+  # No pipelines configured by default for now
+  template.yaml: |-
+  {{- include "common.tplvalues.render" (dict "value" .Values.compilation.template.custom "context" $) | nindent 4 }}
+{{- end }}

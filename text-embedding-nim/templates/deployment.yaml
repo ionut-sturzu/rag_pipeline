@@ -1,0 +1,308 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-NvidiaProprietary
+#
+# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+# property and proprietary rights in and to this material, related
+# documentation and any modifications thereto. Any use, reproduction,
+# disclosure or distribution of this material and related documentation
+# without an express license agreement from NVIDIA CORPORATION or
+# its affiliates is strictly prohibited.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nemo-embedder.fullname" . }}
+  labels:
+    {{- include "nemo-embedder.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "nemo-embedder.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "nemo-embedder.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      restartPolicy: Always
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+      {{- range $k, $v := .Values.imagePullSecrets }}
+      {{- if $v }}
+      - name: "{{ $v }}"
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      serviceAccountName: {{ include "nemo-embedder.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        {{- if .Values.compilation.enabled }}
+        {{- if eq .Values.compilation.source "ngc" }}
+        - name: {{ include "nemo-embedder.fullname" . }}-model-downloader
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              if  [ ! -d /models/{{ .Values.compilation.directoryName }} ] ; then
+                echo "No model found downloaded. Starting downloading {{ .Values.compilation.directoryName }}" &&
+                ngc registry model download-version --org {{ (split "/" .Values.compilation.path)._0 }} --dest /models {{ .Values.compilation.path }} &&
+                chmod -R o+rX /models/{{ .Values.compilation.directoryName }} &&
+                chmod -R o+rX /models/{{ .Values.compilation.directoryName }}/* &&
+                echo "Model successfully downloaded"
+              else
+                echo "/models/{{ .Values.compilation.directoryName }} already downloaded"
+              fi
+
+              ls -la /models && ls -la /models/*
+          env:
+            - name: NGC_CLI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ngc-api
+                  key: NGC_CLI_API_KEY
+          volumeMounts:
+            - name: models
+              subPath: embedder-models
+              mountPath: /models
+          resources:
+            limits:
+              memory: 4Gi
+              cpu: "1000m"
+            requests:
+              memory: 4Gi
+              cpu: "1000m"
+        {{- end }}
+        {{- if eq .Values.compilation.source "git" }}
+        - name: {{ include "nemo-embedder.fullname" . }}-git-model-downloader
+          image: alpine/git
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              if [ ! -d /models/{{ .Values.compilation.directoryName }} ] ; then
+                echo "No model found downloaded. Starting downloading {{ .Values.compilation.directoryName }}" &&
+                mkdir -p /models/{{ .Values.compilation.directoryName }} &&
+                git clone {{ .Values.compilation.path }} /models/{{ .Values.compilation.directoryName }} &&
+                chmod -R o+rX /models/{{ .Values.compilation.directoryName }} &&
+                chmod -R o+rX /models/{{ .Values.compilation.directoryName }}/* &&
+                echo "Model successfully downloaded"
+              else
+                echo "/models/{{ .Values.compilation.directoryName }} already downloaded";
+              fi
+
+              ls -la /models && ls -la /models/*
+          volumeMounts:
+            - name: models
+              subPath: embedder-models
+              mountPath: /models
+          resources:
+            limits:
+              memory: 4Gi
+              cpu: "1000m"
+            requests:
+              memory: 4Gi
+              cpu: "1000m"
+        {{- end }}
+        {{- end }}
+        - name: verify-model-permissions
+          image: busybox
+          command:
+            - "sh"
+            - "-c"
+            - "mkdir -p /scratch/compilation /scratch/.cache && chown -R {{ .Values.nemo.userID }}:{{ .Values.nemo.groupID }} /model-store /triton-store /models /scratch"
+          volumeMounts:
+            - name: ephemeral
+              subPath: scratch
+              mountPath: /scratch
+            - name: models
+              subPath: compilation
+              mountPath: /model-store
+
+            - name: models
+              subPath: embedder-models
+              mountPath: /models
+            - name: models
+              subPath: embedder-triton-store
+              mountPath: /triton-store
+
+      containers:
+        - name: {{ include "nemo-embedder.fullname" . }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: IfNotPresent
+          command:
+          {{- if .Values.compilation.enabled }}
+            - /bin/sh
+            - -c
+            - |
+              if [ ! -e /models/{{ .Values.compilation.directoryName }} ]; then
+                echo "model not loaded yet"
+                sleep 5
+                exit 1
+              fi
+
+              if [ ! -d /triton-store/{{ .Values.compilation.directoryName }}/{{ .Values.compilation.revision }} ] ; then
+              echo "Compiling the model {{ .Values.compilation.directoryName }} using template {{ default "template.yaml" .Values.compilation.template.file }}" &&
+                model_repo_generator /app/{{ (eq .Values.compilation.template.file "") | ternary "model_configs" "model_config_templates" }}/{{ default "template.yaml" .Values.compilation.template.file }} -c /models/{{ .Values.compilation.directoryName }}/{{ .Values.compilation.checkpoint }} &&
+                echo "Model successfuly compiled. Moving it to /triton-store/{{ .Values.compilation.directoryName }}/{{ .Values.compilation.revision }}" &&
+                mkdir -p /triton-store/{{ .Values.compilation.directoryName }}/{{ .Values.compilation.revision }} &&
+                mv /model-store/* /triton-store/{{ .Values.compilation.directoryName }}/{{ .Values.compilation.revision }}
+              fi
+
+              echo "Starting the application" ;
+
+              /app/bin/web -p {{ .Values.service.http_port }} -m /triton-store/{{ .Values.compilation.directoryName }}/{{ .Values.compilation.revision }} {{ .Values.extraEntrypointArgs }}
+          {{ else }}
+            - /opt/nim/start-server.sh
+          {{- end }}
+          env:
+            # HOST_IP and NAMESPACE Should always be available
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: HF_HOME
+              value: /scratch/.cache
+            - name: TMPDIR
+              value: /scratch/compilation
+            - name: NIM_CACHE_PATH
+              value: /compiled-models
+            - name: NIM_SERVER_PORT
+              value: {{ .Values.service.http_port | quote }}
+            - name: NGC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ngc-api
+                  key: NGC_CLI_API_KEY
+
+            {{- if .Values.envVars }}
+            {{- range $k, $v := .Values.envVars }}
+            - name: "{{ $k }}"
+              value: "{{ $v }}"
+            {{- end }}
+            {{- end }}
+
+            {{- if .Values.otelEnabled }}
+            {{- range $k, $v := .Values.otelEnvVars }}
+            - name: "{{ $k }}"
+              value: "{{ $v }}"
+            {{- end }}
+            {{- if and .Values.otelEnabled ( not ( index .Values.otelEnvVars "OTEL_EXPORTER_OTLP_ENDPOINT" ) ) }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://{{ .Release.Name }}-opentelemetry-collector:4318"
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: http/protobuf
+            {{- end }}
+            - name: CONSOLE_LOG_LEVEL
+              value: "{{ .Values.logLevel }}"
+            - name: OTEL_LOG_LEVEL
+              value: "{{ .Values.logLevel }}"
+            {{- else }}
+            - name: OTEL_TRACES_EXPORTER
+              value: none
+            - name: OTEL_METRICS_EXPORTER
+              value: none
+            - name: OTEL_LOGS_EXPORTER
+              value: none
+            - name: OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED
+              value: "false"
+            - name: LOG_HANDLERS
+              value: console
+            - name: CONSOLE_LOG_LEVEL
+              value: "{{ .Values.logLevel }}"
+            {{- end }}
+
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.startupProbe | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+
+          volumeMounts:
+            - name: ephemeral
+              subPath: scratch
+              mountPath: /scratch
+
+            - name: models
+              subPath: precompiled-triton-store
+              mountPath: /compiled-models
+
+            {{- if .Values.compilation.enabled}}
+            - name: ephemeral
+              subPath: compilation
+              mountPath: /model-store
+            - name: models
+              subPath: embedder-models
+              mountPath: /models
+            - name: models
+              subPath: embedder-triton-store
+              mountPath: /triton-store
+            {{- if .Values.compilation.template.custom }}
+            - name: {{ include "nemo-embedder.fullname" . }}-template
+              mountPath: /app/model_configs/
+              readOnly: true
+            {{- end }}
+            {{- end }}
+
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.http_port }}
+              protocol: TCP
+            {{- if .Values.service.grpc_port }}
+            - containerPort: 8001
+              name: grpc
+            {{- end }}
+            {{- if .Values.metrics.enabled }}
+            - containerPort: 8002
+              name: metrics
+            {{- end }}
+
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ include "nemo-embedder.model-claim-name" . }}
+
+        - name: ephemeral
+          emptyDir:
+            sizeLimit: {{ .Values.maxModelSize }}
+
+        {{- if and .Values.compilation.enabled .Values.compilation.template.custom }}
+        - name: {{ include "nemo-embedder.fullname" . }}-template
+          configMap:
+            name: {{ include "nemo-embedder.fullname" . }}-template
+        {{- end }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

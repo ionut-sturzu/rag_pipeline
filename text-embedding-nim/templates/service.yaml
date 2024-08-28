@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-NvidiaProprietary
+#
+# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+# property and proprietary rights in and to this material, related
+# documentation and any modifications thereto. Any use, reproduction,
+# disclosure or distribution of this material and related documentation
+# without an express license agreement from NVIDIA CORPORATION or
+# its affiliates is strictly prohibited.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nemo-embedder.fullname" . }}
+  labels: {{- include "nemo-embedder.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    {{- if .Values.service.http_port }}
+    - port: {{ .Values.service.http_port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+      {{- if .Values.service.nodePort }}
+      {{- with .Values.service.nodePort }}
+      nodePort:  {{ . }}
+      {{- end }}
+      {{- end }}
+    {{- end }}
+    {{- if .Values.service.grpc_port }}
+    - port: {{ .Values.service.grpc_port }}
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+    {{- end }}
+    {{- if .Values.metrics.enabled }}
+    - port: 8002
+      targetPort: metrics
+      name: metrics
+    {{- end }}
+
+  selector:
+    {{- include "nemo-embedder.selectorLabels" . | nindent 4 }}

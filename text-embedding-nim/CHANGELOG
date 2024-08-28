@@ -1,0 +1,48 @@
+# CHANGELOG
+
+## v0.1.13 - 22 Jul 2024
+
+Bump for default image tag
+
+## v0.1.12 - 17 Jul 2024
+
+Bump for default image tag
+
+## v0.1.10 - 12 Jul 2024
+
+Fix bug in Ingress
+
+## v0.1.8 - 01 Jul 2024
+
+Update the chart to more closely align with nim-llm
+
+## v0.1.6 - 28 Jun 2024
+
+Update default modelID for precompiled model
+
+## v0.1.5 - 26 Jun 2024
+
+Update default modelID for precompiled model
+
+## v0.1.4 - 25 Jun 2024
+
+Stabilize chart and include instructions for snowflake arctic
+
+## v0.1.3 - 24 Jun 2024
+
+Modification to allow for dynamic PersistentVolume provisioners
+Allow configuration of the ephemeral workspace size
+
+## v0.1.2 - 7 Jun 2024
+
+Modify download model job to be an init container.
+Add model compilation step with caching.
+Add ability to download git lfs models to the PVC.
+Add ability to configure the storage class of the PVC.
+Add ability to override the template file.
+Add ability to override OTEL configuration
+Add chart dependencies to allow the container to run standalone
+
+## v0.1.0 - 9 Apr 2024
+
+Initial version

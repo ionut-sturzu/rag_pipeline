@@ -1,0 +1,39 @@
+# nv-embed-qa_v4 - no fp8 quantization
+model:
+  source: ngc
+  directoryName: nv-embed-qa_v4
+  checkpoint: NV-Embed-QA-4.nemo
+  template:
+    file: ""
+    custom:
+      triton_store_path: "/model-store/"
+      models:
+        - name: "NV-Embed-QA"
+          checkpoint_path: "<path-to-nemo-checkpoint>"
+          triton_config:
+            trt:
+              num_instances: 2
+              opt_shapes: [32, 512]
+              max_shapes: [128, 512]
+              max_queue_delay_microseconds: 1
+              dtype: float16
+            pipeline:
+              num_instances: 4
+          input_type_prefix:
+            query: "query: "
+            passage: "passage: "
+  path: ohlfw0olaadg/ea-participants/nv-embed-qa:4
+  revision: "1"
+
+resources:
+  limits:
+    ephemeral-storage: 30Gi
+    nvidia.com/gpu: 1
+    memory: 12Gi
+    cpu: "32000m"
+  requests:
+    ephemeral-storage: 4Gi
+    nvidia.com/gpu: 1
+    memory: 8Gi
+    cpu: "1000m"
+

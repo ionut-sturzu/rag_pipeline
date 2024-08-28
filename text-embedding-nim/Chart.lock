@@ -1,0 +1,12 @@
+dependencies:
+- name: common
+  repository: oci://registry-1.docker.io/bitnamicharts
+  version: 2.20.3
+- name: zipkin
+  repository: https://zipkin.io/zipkin-helm
+  version: 0.1.2
+- name: opentelemetry-collector
+  repository: https://open-telemetry.github.io/opentelemetry-helm-charts
+  version: 0.78.1
+digest: sha256:d8cd2578a3c16d85a9b4898a60ddc326d17eff3b6cad041e30ffee5c6ab4140f
+generated: "2024-06-18T14:53:54.142387464-07:00"

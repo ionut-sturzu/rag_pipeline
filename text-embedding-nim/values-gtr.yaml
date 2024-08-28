@@ -1,0 +1,9 @@
+model:
+  source: git
+  directoryName: sentence-transformers/gtr-t5-base
+  template:
+    file: "gtr_template.yaml"
+    custom: null
+  path: https://huggingface.co/sentence-transformers/gtr-t5-base
+  checkpoint: ""
+  revision: "1"

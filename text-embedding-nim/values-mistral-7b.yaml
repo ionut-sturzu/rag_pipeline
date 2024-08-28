@@ -1,0 +1,21 @@
+model:
+  source: ngc
+  directoryName: nv-embed-qa-mistral-7b_v1
+  template:
+    file: "NV-Embed-QA-Mistral-7B_template.yaml"
+    custom: null
+  path: ohlfw0olaadg/ea-participants/nv-embed-qa-mistral-7b:1
+  checkpoint: ""
+  revision: "1"
+resources:
+  limits:
+    # compilation of GPU models requires ephemeral storage
+    ephemeral-storage: 50Gi
+    nvidia.com/gpu: 1
+    memory: 64Gi
+    cpu: "32000m"
+  requests:
+    ephemeral-storage: 27Gi
+    nvidia.com/gpu: 1
+    memory: 32Gi
+    cpu: "4000m"

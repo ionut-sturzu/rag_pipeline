@@ -1,0 +1,294 @@
+fullnameOverride: nemo-embedding-ms
+nameOverride: ""
+
+podSecurityContext:
+  fsGroup: 1000
+
+image:
+  repository: nvcr.io/nvidian/nemo-llm/nv-embedqa-e5-v5
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+# Model holds the information necessary to download, compile and run the model
+# Default template include fp8 quantization and needs an H100 to run
+# exactly one of nim.enabled or compile.enabled must be true
+compilation:
+  enabled: false
+  # source options: ngc, github
+  source: ngc
+  # the directoryName downloaded by ngc-cli, or the path to git clone into
+  directoryName: nv-embed-qa_v4
+  # the checkpoint name in the case of .nemo formatted checkpoints, or empty string
+  checkpoint: NV-Embed-QA-4.nemo
+  template:
+    # the name of the template in the container to use, or if empty if custom template is used
+    file: NV-Embed-QA_template.yaml
+    # This option allows you to pass a full configuration for compiling
+    # the model, including adding different max_shapes and opt_shapes
+    # to allow for different memory capacities on GPUs
+    custom: null
+  # The path to download from ngc or github
+  path: ohlfw0olaadg/ea-participants/nv-embed-qa:4
+  # An optional revision number to force recompilation
+  revision: "fp16"
+
+# The maximum size of the compilation ephemeral workspace
+maxModelSize: 40Gi
+
+# Values used for autoscaling. If autoscaling is not enabled, these are ignored.
+# They should be overriden on a per-model basis based on quality-of-service metrics as well as cost metrics.
+# Example metric to scale on not a suggestion, just an illustration
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+# replicaCount is only used when autoscaling is false
+replicaCount: 1
+
+podAnnotations:
+  traffic.sidecar.istio.io/excludeOutboundPorts: "8007"
+
+podLabels: {}
+
+securityContext: {}
+
+imagePullSecrets:
+  nvcrimagepullsecret: true
+
+imagePullSecret:
+  # Leave blank, if no imagePullSecret is needed.
+  registry: "nvcr.io"
+  name: "nvcrimagepullsecret"
+  # If set to false, the chart expects either a imagePullSecret
+  # with the name configured above to be present on the cluster or that no
+  # credentials are needed.
+  create: false
+  username: '$oauthtoken'
+  password: ""
+
+# override any environment variables by providing key : value pairs
+# in this dictionary
+envVars: {}
+
+# Controls the PVC parameters
+persistence:
+  # class is cluster dependent, check storage classes available using kubectl
+  class: null
+  size: 50Gi
+  accessMode: "ReadWriteOnce"
+  # set hostPath to the path in minikube to allow for mounting
+  # models to avoid downloads and recompilations
+  hostPath: null
+  # set retain to true when you don't want the pvc deleted when helm
+  # upgrades or is deleted
+  retain: true
+  # whether to to create the PV manually, set to false to have
+  # the storage class provisioner to create PersistentVolume
+  createPV: false
+
+  # Set the existing PVC claim name
+  existingClaimName: null
+
+service:
+  type: ClusterIP
+  http_port: 8080
+  grpc_port: null
+  nodePort: null
+  annotations: {}
+
+ingress:
+  enabled: false # ingress, or virtualService - not both
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+metrics:
+  enabled: false
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Automatically mount a ServiceAccount's API credentials?
+  automount: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+# default for GPU deployment without fp8 quantization
+resources:
+  limits:
+    # compilation of GPU models requires ephemeral storage
+    ephemeral-storage: 30Gi
+    nvidia.com/gpu: 1
+    memory: 12Gi
+    # CPU is used to:
+    #  - export pytorch models to Onnx in parallel
+    #  - fp8 quantization
+    #  - TRT engine compilation
+    #
+    # If quantizing to fp8, set this number to 48000m or higher
+    cpu: "32000m"
+  requests:
+    ephemeral-storage: 3Gi
+    nvidia.com/gpu: 1
+    memory: 8Gi
+    cpu: "4000m"
+
+zipkinDeployed: false
+
+otelDeployed: false
+otelEnabled: false
+
+opentelemetry-collector:
+  mode: deployment
+  config:
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+          http:
+            cors:
+              allowed_origins:
+                - "*"
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: nim-triton-metrics
+              scrape_interval: 10s
+              static_configs:
+                - targets: ["nemo-embedding-ms:8002"]
+    exporters:
+      # NOTE: Prior to v0.86.0 use `logging` instead of `debug`.
+      zipkin:
+        endpoint: "http://nemo-embedder-zipkin:9411/api/v2/spans"
+      debug:
+        verbosity: detailed
+      otlp:
+        endpoint: "0.0.0.0:4318"
+        tls:
+          insecure: true
+    extensions:
+      health_check: {}
+      zpages:
+        endpoint: 0.0.0.0:55679
+    processors:
+      batch: {}
+      tail_sampling:
+        # filter out health checks
+        # https://github.com/open-telemetry/opentelemetry-collector/issues/2310#issuecomment-1268157484
+        policies:
+          - name: drop_noisy_traces_url
+            type: string_attribute
+            string_attribute:
+              key: http.target
+              values:
+                - \/health
+              enabled_regex_matching: true
+              invert_match: true
+      transform:
+        trace_statements:
+          - context: span
+            statements:
+              - set(status.code, 1) where attributes["http.path"] == "/health"
+              # CAN UNDO if requested: replace sensitive ID information in the http target and http URL
+              - replace_pattern(attributes["http.target"], "/collections/[\\w-]+/documents/[\\w-]+", "/collections/{collection_id}/documents/{document_id}")
+              - replace_pattern(attributes["http.target"], "/collections/[\\w-]+/search", "/collections/{collection_id}/search")
+              - replace_pattern(attributes["http.target"], "/collections/[\\w-]+$", "/collections/{collection_id}")
+              - replace_pattern(attributes["http.url"], "/collections/[\\w-]+/documents/[\\w-]+", "/collections/{collection_id}/documents/{document_id}")
+              - replace_pattern(attributes["http.url"], "/collections/[\\w-]+/search", "/collections/{collection_id}/search")
+              - replace_pattern(attributes["http.url"], "/collections/[\\w-]+$", "/collections/{collection_id}")
+
+              # after the http target has been anonymized, replace other aspects of the span
+              - replace_match(attributes["http.route"], "/v1", attributes["http.target"]) where attributes["http.target"] != nil
+
+              # replace the title of the span with the route to be more descriptive
+              - replace_pattern(name, "/v1", attributes["http.route"]) where attributes["http.route"] != nil
+
+              # set the route to equal the URL if it's nondescriptive (for the embedding case)
+              - set(name, Concat([name, attributes["http.url"]], " ")) where name == "POST"
+    service:
+      extensions: [zpages, health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          exporters: [debug, zipkin]
+          processors: [tail_sampling, transform]
+        metrics:
+          receivers: [otlp, prometheus]
+          exporters: [debug, otlp]
+          processors: [batch]
+        logs:
+          receivers: [otlp]
+          exporters: [debug]
+          processors: [batch]
+
+otelEnvVars:
+  OTEL_SERVICE_NAME: "nemo-embedding-service"
+  OTEL_TRACES_EXPORTER: otlp
+  OTEL_METRICS_EXPORTER: otlp
+  OTEL_LOGS_EXPORTER: none
+  OTEL_PROPAGATORS: "tracecontext,baggage"
+  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=$(NAMESPACE)"
+  OTEL_PYTHON_EXCLUDED_URLS: "health"
+  OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: "true"
+  # OTEL_EXPORTER_OTLP_ENDPOINT: "http://$(HOST_IP):4318" # sends to gRPC receiver on port 4317
+
+logLevel: INFO
+
+# Extra arguments to pass to the main container
+# -t - the number of tokenizers (default number of CPUs on the k8s node)
+extraEntrypointArgs: "-t 16"
+
+nemo:
+  userID: "1000"
+  groupID: "1000"
+
+startupProbe:
+  httpGet:
+    path: /v1/health/live
+    port: 8080
+  periodSeconds: 10
+  timeoutSeconds: 20
+  initialDelaySeconds: 20
+  failureThreshold: 125
+
+livenessProbe:
+  httpGet:
+    path: /v1/health/live
+    port: 8080
+
+readinessProbe:
+  httpGet:
+    path: /v1/health/live
+    port: 8080
+
+
+nodeSelector: {}
+
+tolerations:
+  - key: "nvidia.com/gpu"
+    operator: "Exists"
+    effect: "NoSchedule"
+
+affinity: {}

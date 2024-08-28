@@ -1,0 +1,22 @@
+apiVersion: v2
+dependencies:
+- name: common
+  repository: oci://registry-1.docker.io/bitnamicharts
+  tags:
+  - bitnami-common
+  version: 2.x.x
+- condition: zipkinDeployed
+  name: zipkin
+  repository: https://zipkin.io/zipkin-helm
+  version: 0.1.2
+- condition: otelDeployed
+  name: opentelemetry-collector
+  repository: https://open-telemetry.github.io/opentelemetry-helm-charts
+  version: 0.78.1
+description: A Helm chart for Kubernetes
+maintainers:
+- name: NVIDIA, Inc.
+  url: https://www.nvidia.com/
+name: text-embedding-nim
+type: application
+version: 1.0.0
